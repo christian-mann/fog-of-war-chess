@@ -578,7 +578,7 @@ class King(Piece):
 	model = "models/king"
 	def validMoves(self, pieces):
 		x,y = self.square
-		return set((i,j) for i in range(8) for j in range(8) if abs(i - x) + abs(j - y) == 1 and (not pieces[i,j] or pieces[i,j].obj.getColor() != self.obj.getColor()))
+		return set((i,j) for i in range(8) for j in range(8) if abs(i - x) * abs(j - y) == 1 and (not pieces[i,j] or pieces[i,j].obj.getColor() != self.obj.getColor()))
 
 class Queen(Piece):
 	model = "models/queen"
