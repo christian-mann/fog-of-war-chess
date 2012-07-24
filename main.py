@@ -757,11 +757,9 @@ class SetupMenu:
 			self.ip = addr
 			w = World(self.mode, self.ip)
 			
-		ip = DirectFrame(frameColor=(1,1,1,1), frameSize=(-1, 1, -1, 1), pos=(0, 0, 0))
-		tb = DirectEntry(text="", scale=.05, command=submitIP, initialText="", numLines=1, focus=1)
+		ip = DirectDialog(dialogName='IPDialog', text='Please enter the server IP address:', buttonTextList=[], buttonValueList=[], command=None, fadeScreen=1)
+		tb = DirectEntry(text="", scale=.05, command=submitIP, initialText="", numLines=1, focus=1, pos=(-0.25,0,-0.15))
 		tb.reparentTo(ip)
-		lbl = DirectLabel(text="Please enter the server IP address:", scale=.05, pos=(0.3, 0, 0.4))
-		lbl.reparentTo(ip)
 	
 m = SetupMenu()
 run()
