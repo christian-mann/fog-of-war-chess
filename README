@@ -1,0 +1,14 @@
+README
+
+Fog of War Chess is a version of chess with the following restriction: A player may only see those spaces to which he could, on the next turn, conceivably move one of his pieces.
+There is one exception: Pawns can see the three squares immediately in front of them.
+
+This implementation is network-enabled. To play, have one player run the program and select "Server".
+Then have the second player run the program, select "Client", and put the IP address of the server in the dialog box.
+
+This implementation will not tell you when you are checkmated. However, you will not be allowed to violate the rules of chess (i.e. placing your king in check, etc).
+
+CONTACT
+
+Christian Mann
+christian-mann@utulsa.edu
