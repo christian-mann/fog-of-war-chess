@@ -336,7 +336,10 @@ class World(DirectObject):
 					self.pieces = oldPieces
 					self.pieces[self.dragOrigin].obj.setPos(SquarePos(self.dragOrigin))
 					print "Invalid move -- King is in check"
-					self.d = OkDialog(text="That move would put your King in check!")
+					
+					def closeDialog():
+						self.d.removeNode()
+					self.d = OkDialog(text="That move would put your King in check!", command=closeDialog)
 				else:
 					self.pieces = oldPieces
 					
