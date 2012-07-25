@@ -603,11 +603,13 @@ class Pawn(Piece):
 	
 	def visibleSquares(self, pieces):
 		#pawns have different visibility rules; namely they can *always* see the three that they could conceivably move to. They're awesome scouts!
+		# They can also see two squares ahead no matter what. This could involve seeing around other pieces.
 		x,y = self.square
 		visibles = Piece.visibleSquares(self, pieces)
 		visibles.add((x, y+self.dir))
 		if x+1<8: visibles.add((x+1, y+self.dir))
 		if x-1>=0: visibles.add((x-1, y+self.dir))
+		if 0 <= y+self.dir < 8: visibles.add((x, y+self.dir*2))
 		
 		return visibles
 		
