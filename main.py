@@ -12,7 +12,7 @@ from pandac.PandaModules import *
 from direct.gui.OnscreenText import OnscreenText
 from direct.showbase.DirectObject import DirectObject
 from direct.task.Task import Task
-from direct.interval.IntervalGlobal import Sequence,Parallel,Func
+from direct.interval.IntervalGlobal import Sequence,Parallel,Func,Wait
 from direct.distributed.PyDatagram import PyDatagram
 from direct.distributed.PyDatagramIterator import PyDatagramIterator
 from direct.gui.OnscreenText import OnscreenText 
@@ -343,7 +343,7 @@ class World(DirectObject):
 				else:
 					self.pieces = oldPieces
 					
-					self.makeMove(self.dragOrigin, self.hiSq, dt=0, callback=self.showVisibleSquares)
+					self.makeMove(self.dragOrigin, self.hiSq, dt=0, callback=self.showVisibleSquares).start()
 					self.sendMove(self.dragOrigin, self.hiSq)
 					self.squares[self.dragOrigin].setColor(SquareColor(self.dragOrigin))
 					
@@ -387,13 +387,13 @@ class World(DirectObject):
 				def dismiss(val):
 					self.d.removeNode()
 				self.d = OkDialog(text="You are in check!", command=dismiss)
-			
+
 		s = Sequence(
 			frP.obj.posInterval(dt, self.squares[to].getPos()),
 			Func(updateState)
 		)
 		if callback: s.append(Func(callback))
-		s.start()
+		return s
 	
 	# Removes the piece. This method is passed a Piece object, not a location!
 	# Possible improvements: Particle effects! :D
@@ -421,10 +421,12 @@ class World(DirectObject):
 				continue
 			destSquare = random.choice([s for s in self.pieces[chosenPiece].validMoves(self.pieces)])
 			move = (chosenPiece, destSquare)
-		self.makeMove(*move)
+		self.makeMove(*move).start()
 	
 	#### VISIBILITY UPDATES ####
 	
+	def isVisible(self, sq):
+		return self.squares[sq].getPos().z == 0
 	# The next two methods deal with hiding and showing the squares of the board.
 	# They hide them by dropping them down below the board.
 	def hideSquare(self, sq, dt="default", callback=None):
@@ -442,11 +444,11 @@ class World(DirectObject):
 				Func(internalCallback)
 			)
 			if callback: s.append(Func(callback))
-			s.start()
 			return s
 		else:
-			if callback: callback()
-			return Sequence()
+			s = Sequence()
+			if callback: s.append(Func(callback))
+			return s
 	
 	def showSquare(self, sq, dt="default", callback=None):
 		
@@ -467,11 +469,34 @@ class World(DirectObject):
 			)
 			
 			if callback: s.append(Func(callback))
-			s.start()
 			return s
 		else:
-			if callback: callback()
-			return Sequence()
+			s = Sequence()
+			if callback: s.append(Func(callback))
+			return s
+
+	# Shows the path that a piece takes on its way IF any part of it is visible to the current player
+	def showPathIfVisible(self, fr, to):
+		if self.pieces[fr]:
+			path = set()
+			showSquareSequences = Parallel()
+			if self.pieces[fr]:
+				path.update(self.pieces[fr].path(to))
+			if any(self.isVisible(sq) for sq in path):
+				for sq in path:
+					showSquareSequences.append(self.showSquare(sq))
+			return showSquareSequences
+		else:
+			return Parallel()
+	# Shows the path that a piece takes on its path from its origin to its destination
+	def showPath(self, fr, to):
+		path = set()
+		showSquareSequences = Parallel()
+		if self.pieces[fr]:
+			path.update(self.pieces[fr].path(to))
+		for sq in path:
+			showSquareSequences.append(self.showSquare(sq))
+		return showSquareSequences
 	
 	# Updates the board to show only the squares that are visible at the current time.
 	def showVisibleSquares(self, dt="default"):
@@ -481,14 +506,15 @@ class World(DirectObject):
 				if self.pieces[p].color == self.player:
 					for s in self.pieces[p].visibleSquares(self.pieces):
 						visibles[s] = True
-						
+
+		par = Parallel()
 		for s in self.squares:
 			if visibles[s]:
-				if dt=="default": self.showSquare(s)
-				else: self.showSquare(s, dt)
+				par.append(self.showSquare(s, dt))
 			else:
-				if dt=="default": self.hideSquare(s)
-				else: self.hideSquare(s, dt)
+				par.append(self.hideSquare(s, dt))
+		par.start()
+		return par
 	
 	#### NETWORK I/O ####
 	def sendMove(self, fr, to):
@@ -506,11 +532,19 @@ class World(DirectObject):
 		fr = (dg.getUint8(), dg.getUint8())
 		to = (dg.getUint8(), dg.getUint8())
 		print "Received move %s -> %s" % (fr, to)
-		self.makeMove(fr, to, callback=self.showVisibleSquares)
-		
-		self.turnIndicator['text'] = 'Your turn!'
-		self.sfx = loader.loadSfx('audio/ding.wav')
-		self.sfx.play()
+
+		def indicate():
+			self.turnIndicator['text'] = 'Your turn!'
+			self.sfx = loader.loadSfx('audio/ding.wav')
+			self.sfx.play()
+
+		seq = Sequence()
+		seq.append(self.showPathIfVisible(fr, to))
+		seq.append(self.makeMove(fr, to))
+		seq.append(Func(indicate))
+		seq.append(Func(self.showVisibleSquares))
+
+		seq.start()
 	
 class Piece:
 	def __init__(self, square, color):
