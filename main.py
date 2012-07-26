@@ -13,6 +13,7 @@ from direct.gui.OnscreenText import OnscreenText
 from direct.showbase.DirectObject import DirectObject
 from direct.task.Task import Task
 from direct.interval.IntervalGlobal import Sequence,Parallel,Func,Wait
+from direct.interval.LerpInterval import LerpFunctionInterval
 from direct.distributed.PyDatagram import PyDatagram
 from direct.distributed.PyDatagramIterator import PyDatagramIterator
 from direct.gui.OnscreenText import OnscreenText 
@@ -120,6 +121,7 @@ class World(DirectObject):
 			#Set a tag on the square's node so we can look up what square this is
 			#later during the collision pass
 			self.squares[place].find("**/polygon").node().setTag('square', ' '.join(map(str,place)))
+			self.squares[place].setTransparency(TransparencyAttrib.MAlpha)
 
 	def setupPieces(self):
 		#Default dictionaries work decently well as an easy two-dimensional array.
@@ -140,6 +142,8 @@ class World(DirectObject):
 			
 			#load black specials
 			self.pieces[i, 7] = pieceOrder[i]((i,7), PIECEBLACK)
+		for p in self.pieces.values():
+			p.obj.setTransparency(TransparencyAttrib.MAlpha)
 	
 	# TODO: Notice when the other side disconnects
 	def setupNetwork(self):
@@ -426,23 +430,20 @@ class World(DirectObject):
 	#### VISIBILITY UPDATES ####
 	
 	def isVisible(self, sq):
-		return self.squares[sq].getPos().z == 0
-	# The next two methods deal with hiding and showing the squares of the board.
-	# They hide them by dropping them down below the board.
-	def hideSquare(self, sq, dt="default", callback=None):
+		return self.squares[sq].getColorScale()[3] == 1.0
 		
-		def internalCallback():
-			if self.pieces[sq]: self.pieces[sq].obj.wrtReparentTo(render)
+	# The next two methods deal with hiding and showing the squares of the board.
+	def hideSquare(self, sq, dt="default", callback=None):
 			
-		if self.squares[sq] and self.squares[sq].getPos().z == 0:
-			if self.pieces[sq]: self.pieces[sq].obj.wrtReparentTo(self.squares[sq])
-			dest = self.squares[sq].getPos()
-			dest.z = -20
-			if dt == "default": dt = abs(dest.z*1.0/20)
-			s = Sequence(
-				self.squares[sq].posInterval(dt, dest),
-				Func(internalCallback)
+		if self.squares[sq] and self.isVisible(sq):
+			if dt == "default": dt = 1.0
+			
+			par = Parallel(
+				LerpFunctionInterval(self.squares[sq].setAlphaScale, toData=0.0, fromData=1.0, duration=dt),
 			)
+			if self.pieces[sq]:
+				par.append(LerpFunctionInterval(self.pieces[sq].obj.setAlphaScale, toData=0.0, fromData=1.0, duration=dt))
+			s = Sequence(par)
 			if callback: s.append(Func(callback))
 			return s
 		else:
@@ -451,23 +452,16 @@ class World(DirectObject):
 			return s
 	
 	def showSquare(self, sq, dt="default", callback=None):
-		
-		if self.squares[sq] and self.squares[sq].getPos().z < 0:
-		
-			dest = self.squares[sq].getPos()
-			if dt == "default": dt = abs(dest.z*1.0/20)
-			dest.z = 0
 			
-			def reparent():
-				if self.pieces[sq]:
-					self.pieces[sq].obj.wrtReparentTo(render)
+		if self.squares[sq] and not self.isVisible(sq):
+			if dt == "default": dt = 1.0
 			
-			if self.pieces[sq]: self.pieces[sq].obj.wrtReparentTo(self.squares[sq])
-			s = Sequence(
-				self.squares[sq].posInterval(dt, dest),
-				Func(reparent)
+			par = Parallel(
+				LerpFunctionInterval(self.squares[sq].setAlphaScale, toData=1.0, fromData=0.0, duration=dt),
 			)
-			
+			if self.pieces[sq]:
+				par.append(LerpFunctionInterval(self.pieces[sq].obj.setAlphaScale, toData=1.0, fromData=0.0, duration=dt))
+			s = Sequence(par)
 			if callback: s.append(Func(callback))
 			return s
 		else:
