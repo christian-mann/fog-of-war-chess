@@ -51,7 +51,7 @@ def SquareColor((x,y)):
 	else: return WHITE
 	
 class World(DirectObject):
-	def __init__(self, mode, ip=None):
+	def __init__(self, mode, ip=None, color=None):
 		
 		if mode==CLIENT and not ip:
 			#Don't let this happen.
@@ -69,7 +69,7 @@ class World(DirectObject):
 		
 		#Saving some values, some default values
 		self.mode = mode
-		self.player = {SERVER: PIECEWHITE, CLIENT: PIECEBLACK}[self.mode]
+		self.player = color
 		self.ip = ip
 		
 		#Panda3D, by default, allows for camera control with the mouse.
@@ -77,22 +77,15 @@ class World(DirectObject):
 		
 		self.setupMouse()
 		self.setupBoard()
-		self.setupCamera()
 		self.setupPieces()
-		self.setupNetwork()
-		self.setupLights()
-		
-		#some internal state for making clicky moves
-		self.hiSq = None
-		self.dragOrigin = None
-		
-		#keyboard, mouse
-		self.mouseTask = taskMgr.add(self.tskMouse, 'mouseTask')
-		self.accept('mouse1', self.handleClick)
-		self.accept('f2', lambda: base.setFrameRateMeter(True))
-		self.accept('f3', lambda: base.setFrameRateMeter(False))
-		self.accept('escape', sys.exit)
-		
+		self.setupNetwork(self.mode)
+		self.setupInterface()
+		if self.player:
+			self.setupLights()
+			self.setupCamera(self.player)
+		else:
+			pass
+			# It will be taken care of when the connection occurs and we actually know which player we are.
 		
 		#first turn
 		self.turn = PIECEWHITE
@@ -146,8 +139,8 @@ class World(DirectObject):
 			p.obj.setTransparency(TransparencyAttrib.MAlpha)
 	
 	# TODO: Notice when the other side disconnects
-	def setupNetwork(self):
-		if self.mode == CLIENT:
+	def setupNetwork(self, mode):
+		if mode == CLIENT:
 			self.setupClient(self.ip)
 		else:
 			self.setupServer()
@@ -179,12 +172,16 @@ class World(DirectObject):
 					self.oppConnection = newConnection
 					self.cReader.addConnection(newConnection)
 					
-					#server starts the game
-					self.turnIndicator['text'] = 'Your turn!'
+					if self.player == self.turn: self.indicateOurTurn()
 					self.showVisibleSquares()
 					
 					#remove the dialog node from below
 					if self.d: self.d.removeNode()
+					
+					# send the starting piece color
+					dg = PyDatagram()
+					dg.addString({PIECEWHITE: "white", PIECEBLACK: "black"}[self.player])
+					self.cWriter.send(dg, self.oppConnection)
 					
 					return Task.done
 			if not self.d: self.d = DirectDialog(text="Waiting for client to connect...", buttonTextList=[], buttonValueList=[])
@@ -208,13 +205,12 @@ class World(DirectObject):
 			self.oppConnection = myConnection
 			
 			taskMgr.add(self.tskReaderPoll, "Poll the connection reader")
-			self.showVisibleSquares()
 		else:
 			self.d = OkDialog(text="Could not connect to server at '%s'" % ip, command=sys.exit)
 	
 	# Makes sure player gets a decent view of the game board, and *not* of the hidden pieces below the board. Shhhh...
-	def setupCamera(self):
-		if self.player == PIECEWHITE:
+	def setupCamera(self, player):
+		if player == PIECEWHITE:
 			camera.setPos(0, -13.75, 8)
 			camera.lookAt(self.squareRoot)
 			camera.setH(0)
@@ -254,6 +250,18 @@ class World(DirectObject):
 		#Register the ray as something that can cause collisions
 		self.picker.addCollider(self.pickerNP, self.pq)
 	
+	def setupInterface(self):
+		#some internal state for making clicky moves
+		self.hiSq = None
+		self.dragOrigin = None
+		
+		#keyboard, mouse
+		self.mouseTask = taskMgr.add(self.tskMouse, 'mouseTask')
+		self.accept('mouse1', self.handleClick)
+		self.accept('f2', lambda: base.setFrameRateMeter(True))
+		self.accept('f3', lambda: base.setFrameRateMeter(False))
+		self.accept('escape', sys.exit)
+		
 	#### TASKS ####
 	
 	# Checks for incoming data on the connection
@@ -341,7 +349,7 @@ class World(DirectObject):
 					self.pieces[self.dragOrigin].obj.setPos(SquarePos(self.dragOrigin))
 					print "Invalid move -- King is in check"
 					
-					def closeDialog():
+					def closeDialog(val):
 						self.d.removeNode()
 					self.d = OkDialog(text="That move would put your King in check!", command=closeDialog)
 				else:
@@ -510,6 +518,11 @@ class World(DirectObject):
 		par.start()
 		return par
 	
+	def indicateOurTurn(self):
+		self.turnIndicator['text'] = 'Your turn!'
+		self.sfx = loader.loadSfx('audio/ding.wav')
+		self.sfx.play()
+		
 	#### NETWORK I/O ####
 	def sendMove(self, fr, to):
 		dg = PyDatagram()
@@ -522,23 +535,34 @@ class World(DirectObject):
 		self.cWriter.send(dg, self.oppConnection)
 	
 	def receiveData(self, dg):
-		dg = PyDatagramIterator(dg)
-		fr = (dg.getUint8(), dg.getUint8())
-		to = (dg.getUint8(), dg.getUint8())
-		print "Received move %s -> %s" % (fr, to)
+		it = PyDatagramIterator(dg)
+		if not self.player:
+			theirColor = it.getString()
+			print "They are", theirColor
+			if theirColor not in ["white", "black"]:
+				sys.exit(0) # todo: crash more nicely
+			self.player = {"white": PIECEBLACK, "black": PIECEWHITE}[theirColor]
+			
+			self.setupCamera(self.player)
+			self.setupLights()
+			self.showVisibleSquares()
+			
+			if self.d: self.d.removeNode()
+			
+			if self.player == self.turn: self.indicateOurTurn()
+		else:
+			fr = (it.getUint8(), it.getUint8())
+			to = (it.getUint8(), it.getUint8())
+			print "Received move %s -> %s" % (fr, to)
 
-		def indicate():
-			self.turnIndicator['text'] = 'Your turn!'
-			self.sfx = loader.loadSfx('audio/ding.wav')
-			self.sfx.play()
 
-		seq = Sequence()
-		seq.append(self.showPathIfVisible(fr, to))
-		seq.append(self.makeMove(fr, to))
-		seq.append(Func(indicate))
-		seq.append(Func(self.showVisibleSquares))
+			seq = Sequence()
+			seq.append(self.showPathIfVisible(fr, to))
+			seq.append(self.makeMove(fr, to))
+			seq.append(Func(self.indicateOurTurn))
+			seq.append(Func(self.showVisibleSquares))
 
-		seq.start()
+			seq.start()
 	
 class Piece:
 	def __init__(self, square, color):
@@ -767,7 +791,6 @@ class Rook(Piece):
 		
 		return set((x,y) for (x,y) in moves if 0 <= x < 8 and 0 <= y < 8)
 
-		
 class SetupMenu:
 	def __init__(self):
 		self.showCSDialog()
@@ -777,12 +800,19 @@ class SetupMenu:
 			d.removeNode()
 			self.mode = mode
 			if self.mode == SERVER:
-				w = World(self.mode)
+				self.showColorDialog()
 			else:
 				self.showIPDialog()
 				
 		d = DirectDialog(dialogName='ClientServerDialog', text='Please choose:', buttonTextList=['Client', 'Server'], buttonValueList=[CLIENT, SERVER], command=submit, fadeScreen=1)
 	
+	def showColorDialog(self):
+		def submit(color):
+			d.removeNode()
+			self.color = color
+			w = World(self.mode, color=self.color)
+		
+		d = DirectDialog(dialogName='ColorDialog', text='Which color?', buttonTextList=['White', 'Black'], buttonValueList=[PIECEWHITE, PIECEBLACK], command=submit, fadeScreen=1)
 	def showIPDialog(self):
 		def submitIP(addr):
 			print addr
